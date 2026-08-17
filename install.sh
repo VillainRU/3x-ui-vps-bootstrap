@@ -369,12 +369,15 @@ install_3x_ui() {
     systemctl restart x-ui
     systemctl is-active --quiet x-ui || die "Сервис x-ui не запустился. Проверьте ${XUI_LOG}."
 
-    local settings listen_settings
+    local settings listen_settings actual_web_base_path
     settings="$($XUI_BINARY setting -show true 2>/dev/null || true)"
     listen_settings="$($XUI_BINARY setting -getListen true 2>/dev/null || true)"
     grep -Eq "^port: ${PANEL_PORT}$" <<< "$settings" || die "Порт панели не прошёл проверку."
     grep -Eq '^listenIP:[[:space:]]*127\.0\.0\.1[[:space:]]*$' <<< "$listen_settings" || die "Привязка панели к 127.0.0.1 не прошла проверку."
-    grep -Eq "^webBasePath: /?${WEB_BASE_PATH}$" <<< "$settings" || die "WebBasePath панели не прошёл проверку."
+    actual_web_base_path="$(awk -F': ' '$1 == "webBasePath" { print $2; exit }' <<< "$settings" | tr -d '[:space:]')"
+    actual_web_base_path="${actual_web_base_path#/}"
+    actual_web_base_path="${actual_web_base_path%/}"
+    [[ "$actual_web_base_path" == "$WEB_BASE_PATH" ]] || die "WebBasePath панели не прошёл проверку."
     if ! ss -H -ltn 2>/dev/null | awk -v needle="127.0.0.1:${PANEL_PORT}" '$4 == needle { found=1 } END { exit !found }'; then
         die "Порт панели ${PANEL_PORT} не слушается на 127.0.0.1."
     fi
