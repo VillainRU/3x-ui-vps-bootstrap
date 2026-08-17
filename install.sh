@@ -378,7 +378,20 @@ install_3x_ui() {
     actual_web_base_path="${actual_web_base_path#/}"
     actual_web_base_path="${actual_web_base_path%/}"
     [[ "$actual_web_base_path" == "$WEB_BASE_PATH" ]] || die "WebBasePath панели не прошёл проверку."
-    if ! ss -H -ltn 2>/dev/null | awk -v needle="127.0.0.1:${PANEL_PORT}" '$4 == needle { found=1 } END { exit !found }'; then
+    local panel_listener_ready=0
+    local attempt
+    for attempt in {1..20}; do
+        if ss -H -ltn 2>/dev/null | awk -v needle="127.0.0.1:${PANEL_PORT}" '$4 == needle { found=1 } END { exit !found }'; then
+            panel_listener_ready=1
+            break
+        fi
+        sleep 1
+    done
+    if (( panel_listener_ready == 0 )); then
+        if command -v journalctl >/dev/null 2>&1; then
+            printf '[!] Последние сообщения службы x-ui:\n' >&2
+            journalctl -u x-ui -n 40 --no-pager >&2 || true
+        fi
         die "Порт панели ${PANEL_PORT} не слушается на 127.0.0.1."
     fi
     if ss -H -ltn 2>/dev/null | awk -v needle=":${PANEL_PORT}" '$4 ~ (needle "$") && $4 !~ /^127\.0\.0\.1:/ && $4 !~ /^\[::1\]:/ { found=1 } END { exit !found }'; then
