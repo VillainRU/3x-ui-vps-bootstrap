@@ -335,34 +335,37 @@ create_linux_user() {
 }
 
 install_3x_ui() {
-    [[ ! -e /usr/local/x-ui/x-ui ]] || die "Похоже, 3x-ui уже установлен. Скрипт не обновляет существующую установку."
-
     local installer_tmp
-    installer_tmp="$(mktemp)"
     XUI_LOG="/var/log/3x-ui-vps-bootstrap-install.log"
-    install -m 600 /dev/null "$XUI_LOG"
-    info "Загружаю официальный установщик 3x-ui; подробный лог: ${XUI_LOG}"
-    if ! curl -fL --retry 3 --connect-timeout 15 --max-time 120 "$XUI_INSTALLER_URL" -o "$installer_tmp"; then
-        rm -f -- "$installer_tmp"
-        die "Не удалось загрузить официальный установщик 3x-ui."
-    fi
-    [[ -s "$installer_tmp" ]] || { rm -f -- "$installer_tmp"; die "Официальный установщик пуст."; }
-    chmod 700 "$installer_tmp"
+    if [[ -e "$XUI_BINARY" ]]; then
+        [[ -f "$XUI_LOG" ]] || die "Похоже, 3x-ui уже установлен не этим скриптом. Скрипт не изменяет существующую установку."
+        info "Обнаружена панель после предыдущего незавершённого запуска; продолжаю её настройку."
+    else
+        installer_tmp="$(mktemp)"
+        install -m 600 /dev/null "$XUI_LOG"
+        info "Загружаю официальный установщик 3x-ui; подробный лог: ${XUI_LOG}"
+        if ! curl -fL --retry 3 --connect-timeout 15 --max-time 120 "$XUI_INSTALLER_URL" -o "$installer_tmp"; then
+            rm -f -- "$installer_tmp"
+            die "Не удалось загрузить официальный установщик 3x-ui."
+        fi
+        [[ -s "$installer_tmp" ]] || { rm -f -- "$installer_tmp"; die "Официальный установщик пуст."; }
+        chmod 700 "$installer_tmp"
 
-    # Инсталлятор upstream работает без вопросов с этими переменными. TLS не
-    # выпускаем: административная панель будет доступна только через SSH-туннель.
-    if ! XUI_NONINTERACTIVE=1 \
-        XUI_SSL_MODE=none \
-        XUI_PANEL_PORT="$PANEL_PORT" \
-        XUI_WEB_BASE_PATH="$WEB_BASE_PATH" \
-        XUI_SERVER_IP="$SERVER_IP" \
-        XUI_DB_TYPE=sqlite \
-        bash "$installer_tmp" >"$XUI_LOG" 2>&1; then
+        # Инсталлятор upstream работает без вопросов с этими переменными. TLS не
+        # выпускаем: административная панель будет доступна только через SSH-туннель.
+        if ! XUI_NONINTERACTIVE=1 \
+            XUI_SSL_MODE=none \
+            XUI_PANEL_PORT="$PANEL_PORT" \
+            XUI_WEB_BASE_PATH="$WEB_BASE_PATH" \
+            XUI_SERVER_IP="$SERVER_IP" \
+            XUI_DB_TYPE=sqlite \
+            bash "$installer_tmp" >"$XUI_LOG" 2>&1; then
+            rm -f -- "$installer_tmp"
+            tail -n 60 "$XUI_LOG" >&2 || true
+            die "Официальный установщик 3x-ui завершился ошибкой."
+        fi
         rm -f -- "$installer_tmp"
-        tail -n 60 "$XUI_LOG" >&2 || true
-        die "Официальный установщик 3x-ui завершился ошибкой."
     fi
-    rm -f -- "$installer_tmp"
     [[ -x "$XUI_BINARY" ]] || die "После установки не найден ${XUI_BINARY}."
 
     info "Устанавливаю заданные учётные данные и привязываю панель к loopback..."
@@ -377,10 +380,11 @@ install_3x_ui() {
     systemctl restart x-ui
     systemctl is-active --quiet x-ui || die "Сервис x-ui не запустился. Проверьте ${XUI_LOG}."
 
-    local settings
+    local settings listen_settings
     settings="$($XUI_BINARY setting -show true 2>/dev/null || true)"
+    listen_settings="$($XUI_BINARY setting -getListen true 2>/dev/null || true)"
     grep -Eq "^port: ${PANEL_PORT}$" <<< "$settings" || die "Порт панели не прошёл проверку."
-    grep -Eq '^listenIP: 127\.0\.0\.1$' <<< "$settings" || die "Привязка панели к 127.0.0.1 не прошла проверку."
+    grep -Eq '^listenIP:[[:space:]]*127\.0\.0\.1[[:space:]]*$' <<< "$listen_settings" || die "Привязка панели к 127.0.0.1 не прошла проверку."
     grep -Eq "^webBasePath: /?${WEB_BASE_PATH}$" <<< "$settings" || die "WebBasePath панели не прошёл проверку."
     if ! ss -H -ltn 2>/dev/null | awk -v needle="127.0.0.1:${PANEL_PORT}" '$4 == needle { found=1 } END { exit !found }'; then
         die "Порт панели ${PANEL_PORT} не слушается на 127.0.0.1."
