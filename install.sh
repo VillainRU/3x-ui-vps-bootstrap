@@ -11,6 +11,7 @@ readonly SSH_SOCKET_DROPIN="${SSH_SOCKET_DROPIN_DIR}/00-3x-ui-vps-hardening.conf
 readonly XUI_INSTALLER_URL="https://raw.githubusercontent.com/MHSanaei/3x-ui/master/install.sh"
 readonly XUI_BINARY="/usr/local/x-ui/x-ui"
 readonly RESULT_FILE="/root/3x-ui-vps-install-result.env"
+readonly LOCAL_TUNNEL_PORT=18080
 
 NEW_USER=""
 NEW_USER_PASSWORD=""
@@ -251,9 +252,9 @@ collect_inputs() {
     done
 
     while true; do
-        read -r -p "Порт административной панели 3x-ui (1–65535): " PANEL_PORT || die "Ввод прерван."
-        if ! is_valid_port "$PANEL_PORT"; then
-            printf 'Введите корректный порт 1–65535.\n' >&2
+        read -r -p "Порт административной панели 3x-ui (1024–65535; выберите свободный): " PANEL_PORT || die "Ввод прерван."
+        if ! is_valid_port "$PANEL_PORT" || (( PANEL_PORT < 1024 )); then
+            printf 'Введите порт в диапазоне 1024–65535.\n' >&2
             continue
         fi
         if (( PANEL_PORT == SSH_PORT )); then
@@ -523,8 +524,8 @@ save_result() {
 
 show_final_instructions() {
     local ssh_uri="ssh://${NEW_USER}@${SERVER_IP}:${SSH_PORT}"
-    local tunnel_command="ssh -N -T -p ${SSH_PORT} -L 127.0.0.1:${PANEL_PORT}:127.0.0.1:${PANEL_PORT} ${NEW_USER}@${SERVER_IP}"
-    local panel_url="http://127.0.0.1:${PANEL_PORT}/${WEB_BASE_PATH}"
+    local tunnel_command="ssh -N -T -p ${SSH_PORT} -L 127.0.0.1:${LOCAL_TUNNEL_PORT}:127.0.0.1:${PANEL_PORT} ${NEW_USER}@${SERVER_IP}"
+    local panel_url="http://127.0.0.1:${LOCAL_TUNNEL_PORT}/${WEB_BASE_PATH}"
 
     printf '\n=== Установка завершена ===\n'
     printf 'Проверочная SSH-ссылка:\n  %s\n' "$ssh_uri"
