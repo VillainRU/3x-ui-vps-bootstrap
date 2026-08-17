@@ -278,19 +278,8 @@ collect_inputs() {
     PANEL_PASSWORD="$READ_PASSWORD_RESULT"
 
     SERVER_IP="$(detect_public_ipv4 || true)"
-    while true; do
-        if [[ -n "$SERVER_IP" ]]; then
-            read -r -p "IPv4 сервера для генерируемых ссылок [${SERVER_IP}]: " entered_ip || die "Ввод прерван."
-            SERVER_IP="${entered_ip:-$SERVER_IP}"
-        else
-            read -r -p "Публичный IPv4 сервера для генерируемых ссылок: " SERVER_IP || die "Ввод прерван."
-        fi
-        if is_valid_ipv4 "$SERVER_IP"; then
-            break
-        fi
-        printf 'Введите корректный IPv4-адрес.\n' >&2
-        SERVER_IP=""
-    done
+    is_valid_ipv4 "$SERVER_IP" || die "Не удалось автоматически определить публичный IPv4-адрес сервера для генерируемых ссылок."
+    info "Для генерируемых ссылок используется IPv4 сервера: ${SERVER_IP}"
 
     WEB_BASE_PATH="$(openssl rand -hex 12)"
     [[ -n "$WEB_BASE_PATH" ]] || die "Не удалось сгенерировать путь панели."
