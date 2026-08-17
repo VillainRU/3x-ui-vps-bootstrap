@@ -19,6 +19,7 @@ SSH_PORT=""
 PANEL_PORT=""
 PANEL_USER=""
 PANEL_PASSWORD=""
+READ_PASSWORD_RESULT=""
 SERVER_IP=""
 WEB_BASE_PATH=""
 BACKUP_DIR=""
@@ -31,7 +32,7 @@ FIREWALLD_RULE_ADDED=0
 COMPLETED=0
 
 cleanup_sensitive() {
-    unset NEW_USER_PASSWORD PANEL_PASSWORD PUBLIC_KEY
+    unset NEW_USER_PASSWORD PANEL_PASSWORD READ_PASSWORD_RESULT PUBLIC_KEY
 }
 
 rollback_ssh() {
@@ -125,11 +126,12 @@ read_password_pair() {
     local label="$1"
     local first=""
     local second=""
+    READ_PASSWORD_RESULT=""
     while true; do
         read -r -s -p "$label" first || die "Ввод пароля прерван."
-        printf '\n'
+        printf '\n' >&2
         read -r -s -p "Повторите пароль: " second || die "Ввод пароля прерван."
-        printf '\n'
+        printf '\n' >&2
         if [[ "$first" != "$second" ]]; then
             printf 'Пароли не совпадают, повторите ввод.\n' >&2
             continue
@@ -138,7 +140,7 @@ read_password_pair() {
             printf 'Используйте пароль длиной не менее 12 символов.\n' >&2
             continue
         fi
-        printf '%s' "$first"
+        READ_PASSWORD_RESULT="$first"
         return 0
     done
 }
@@ -209,7 +211,8 @@ collect_inputs() {
         break
     done
 
-    NEW_USER_PASSWORD="$(read_password_pair "Пароль для ${NEW_USER}: ")"
+    read_password_pair "Пароль для ${NEW_USER}: "
+    NEW_USER_PASSWORD="$READ_PASSWORD_RESULT"
 
     printf '\nВставьте одну строку публичного SSH-ключа. Примеры получения:\n'
     printf '  Windows 10/11: PowerShell → Get-Content $env:USERPROFILE\\.ssh\\id_ed25519.pub\n'
@@ -267,7 +270,8 @@ collect_inputs() {
         fi
         printf 'Используйте 3–64 символа: латиница, цифры, точка, _, -.\n' >&2
     done
-    PANEL_PASSWORD="$(read_password_pair "Пароль для 3x-ui: ")"
+    read_password_pair "Пароль для 3x-ui: "
+    PANEL_PASSWORD="$READ_PASSWORD_RESULT"
 
     SERVER_IP="$(detect_public_ipv4 || true)"
     while true; do
