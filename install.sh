@@ -14,6 +14,8 @@ readonly RESULT_FILE="/root/3x-ui-vps-install-result.env"
 
 NEW_USER=""
 NEW_USER_PASSWORD=""
+USER_WAS_EXISTING=0
+USER_HOME=""
 PUBLIC_KEY=""
 SSH_PORT=""
 PANEL_PORT=""
@@ -188,7 +190,7 @@ install_prerequisites() {
             ;;
     esac
 
-    for command_name in awk curl getent install ip ss ssh-keygen sshd systemctl useradd; do
+    for command_name in awk curl getent grep id install ip ss ssh-keygen sshd systemctl useradd; do
         check_command "$command_name"
     done
     for command_name in chpasswd usermod; do
@@ -199,14 +201,16 @@ install_prerequisites() {
 collect_inputs() {
     printf '\n=== Создание пользователя и защита SSH ===\n'
     while true; do
-        read -r -p "Имя нового Linux-пользователя: " NEW_USER || die "Ввод прерван."
+        read -r -p "Имя Linux-пользователя: " NEW_USER || die "Ввод прерван."
         if ! is_valid_linux_username "$NEW_USER"; then
             printf 'Допустимы строчные латинские буквы, цифры, _, -, первый символ не цифра; root запрещён.\n' >&2
             continue
         fi
         if getent passwd "$NEW_USER" >/dev/null 2>&1; then
-            printf 'Пользователь уже существует. Скрипт не переиспользует чужую учётную запись.\n' >&2
-            continue
+            USER_WAS_EXISTING=1
+            printf 'Пользователь уже существует. Будет переиспользована эта учётная запись: пароль обновится, группа sudo будет добавлена, а ключ сохранится/добавится.\n' >&2
+        else
+            USER_WAS_EXISTING=0
         fi
         break
     done
@@ -293,16 +297,41 @@ collect_inputs() {
 }
 
 create_linux_user() {
-    info "Создаю пользователя ${NEW_USER} и добавляю его в группу sudo..."
-    useradd --create-home --shell /bin/bash "$NEW_USER"
+    local primary_group authorized_keys
+
+    if (( USER_WAS_EXISTING == 1 )); then
+        info "Использую существующего пользователя ${NEW_USER} и добавляю его в группу sudo..."
+    else
+        info "Создаю пользователя ${NEW_USER} и добавляю его в группу sudo..."
+        useradd --create-home --shell /bin/bash "$NEW_USER"
+    fi
+
+    USER_HOME="$(getent passwd "$NEW_USER" | awk -F: 'NR == 1 { print $6 }')"
+    [[ -n "$USER_HOME" && "$USER_HOME" != "/" ]] || die "Не удалось определить домашний каталог пользователя ${NEW_USER}."
+    primary_group="$(id -gn "$NEW_USER")" || die "Не удалось определить основную группу пользователя ${NEW_USER}."
+
     printf '%s:%s\n' "$NEW_USER" "$NEW_USER_PASSWORD" | chpasswd
     usermod --append --groups sudo "$NEW_USER"
 
-    install -d -m 700 -o "$NEW_USER" -g "$NEW_USER" "/home/${NEW_USER}/.ssh"
-    printf '%s\n' "$PUBLIC_KEY" > "/home/${NEW_USER}/.ssh/authorized_keys"
-    chown "$NEW_USER:$NEW_USER" "/home/${NEW_USER}/.ssh/authorized_keys"
-    chmod 600 "/home/${NEW_USER}/.ssh/authorized_keys"
-    ok "Пользователь создан; права superuser предоставлены через группу sudo."
+    install -d -m 700 -o "$NEW_USER" -g "$primary_group" "$USER_HOME/.ssh"
+    authorized_keys="$USER_HOME/.ssh/authorized_keys"
+    [[ ! -L "$authorized_keys" ]] || die "Файл ${authorized_keys} является символической ссылкой; остановлено для безопасности."
+    if [[ ! -e "$authorized_keys" ]]; then
+        install -m 600 -o "$NEW_USER" -g "$primary_group" /dev/null "$authorized_keys"
+    fi
+    if (( USER_WAS_EXISTING == 1 )); then
+        grep -Fqx -- "$PUBLIC_KEY" "$authorized_keys" || printf '%s\n' "$PUBLIC_KEY" >> "$authorized_keys"
+    else
+        printf '%s\n' "$PUBLIC_KEY" > "$authorized_keys"
+    fi
+    chown "$NEW_USER:$primary_group" "$authorized_keys"
+    chmod 600 "$authorized_keys"
+
+    if (( USER_WAS_EXISTING == 1 )); then
+        ok "Существующий пользователь подготовлен; права superuser предоставлены через группу sudo, ключ сохранён/добавлен."
+    else
+        ok "Пользователь создан; права superuser предоставлены через группу sudo."
+    fi
 }
 
 install_3x_ui() {
